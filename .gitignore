@@ -1,3 +1,10 @@
+# Blender Files
+
 *__pycache__*
 *.blend1
 *.blend2
+
+# Vim files
+
+*.swp
+*.swo

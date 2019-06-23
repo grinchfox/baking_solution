@@ -47,7 +47,7 @@ enum_normal_direction = (
 
 def update_solution():
     update_node_solution()
-    
+
 def property_update(self, context):
     update_solution()
 
@@ -97,7 +97,7 @@ class BakingSolutionSettings(bpy.types.PropertyGroup):
     groups: CollectionProperty(type = BakingGroup)
     group_index: IntProperty(default = -1)
     solution_defaults: PointerProperty(type = BakingSolutionNodeSettings)
-    
+
     @property
     def active_group(self):
         if self.group_index < 0 or self.group_index >= len(self.groups):
@@ -117,16 +117,16 @@ class BakingSolutionSettings(bpy.types.PropertyGroup):
 class OperatorAddGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.add_group'
     bl_label = "Baking Solution: Add group"
-    
+
     from_selected_and_active: BoolProperty(default = False)
-    
+
     def execute(self, context):
         settings = context.scene.baking_solution
         selection = context.selected_objects
         active = context.active_object
         if self.from_selected_and_active and active is None:
             return {'CANCEL'}
-        
+
         new_group = settings.groups.add()
         if self.from_selected_and_active:
             new_group.target = active
@@ -135,15 +135,15 @@ class OperatorAddGroup(bpy.types.Operator):
                     newobj = new_group.sources.add()
                     newobj.object = obj
         return {'FINISHED'}
-    
+
 class OperatorRemoveCurrentGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.remove_current_group'
     bl_label = "Remove baking group"
-    
+
     @classmethod
     def poll(cls, context):
         return context.scene.baking_solution.active_group is not None
-    
+
     def execute(self, context):
         settings = context.scene.baking_solution
         settings.groups.remove(settings.group_index)
@@ -160,7 +160,7 @@ def add_object_to_sources(sources, object):
 class OperatorAddSelectedToActiveGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.add_selected_to_active_group'
     bl_label = "Baking Solution: Add selected to active group"
-    
+
     def execute(self, context):
         settings = context.scene.baking_solution
         group = settings.groups[settings.group_index]
@@ -173,9 +173,9 @@ class OperatorAddSelectedToActiveGroup(bpy.types.Operator):
 class OperatorRemoveFromActiveGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.remove_from_active_group'
     bl_label = "Remove"
-    
+
     remove_index: IntProperty(default = -1)
-    
+
     def execute(self, context):
         settings = context.scene.baking_solution
         group = settings.groups[settings.group_index]
@@ -185,15 +185,15 @@ class OperatorRemoveFromActiveGroup(bpy.types.Operator):
             return {'CANCELLED', "No valid property to remove"}
         group.sources.remove(self.remove_index)
         return {'FINISHED'}
-        
+
 class OperatorBake(bpy.types.Operator):
     bl_idname = 'baking_solution.bake'
     bl_label = "Bake"
-    
+
     @classmethod
     def poll(cls, context):
         return context.scene.baking_solution.active_group is not None
-    
+
     def execute(self, context):
         settings = context.scene.baking_solution
         render = context.scene.render
@@ -231,13 +231,13 @@ class OperatorBake(bpy.types.Operator):
             use_cage = group.cage_object is not None
         )
         return {'FINISHED'}
-    
+
 class OperatorResetNodePropToDefaults(bpy.types.Operator):
     bl_idname = 'baking_solution.reset_node_prop'
     bl_label = "Reset"
-    
+
     prop = StringProperty()
-    
+
     def execute(self, context):
         default_data = context.scene.baking_solution.solution_defaults
         data = context.scene.baking_solution.active_group.solution_settings
@@ -247,9 +247,10 @@ class OperatorResetNodePropToDefaults(bpy.types.Operator):
 class OperatorUpdateNodeSolution(bpy.types.Operator):
     bl_idname = 'baking_solution.update_node_solution'
     bl_label = "Update Solution Node"
-    
+
     def execute(self, context):
         update_node_solution()
+        return {'FINISHED'}
 
 # Node Graph
 
@@ -258,11 +259,11 @@ def update_node_solution():
     scene = getattr(context,"scene", bpy.data.scenes[0])
     settings = scene.baking_solution
     solution_settings = settings.active_solution_settings
-    
+
     node_bake_solution = bpy.data.node_groups.get("BakingSolution")
     if node_bake_solution is None:
         node_bake_solution = bpy.data.node_groups.new("BakingSolution","ShaderNodeTree")
-        
+
     def clear_tree(tree):
         for i in tree.keys():
             tree.remove(tree.get(i))
@@ -275,7 +276,7 @@ def update_node_solution():
             print("(Re)creating {} to {} {}".format(node, type, name))
             node = tree.new(type, name)
         return node
-    
+
     nodes = node_bake_solution.nodes
     inputs = node_bake_solution.inputs
     outputs = node_bake_solution.outputs
@@ -296,7 +297,7 @@ def update_node_solution():
     node_in = nodes.new("NodeGroupInput")
     node_out = nodes.new("NodeGroupOutput")
     node_out.location = (1000,0)
-    
+
     mode = settings.solution_mode
     if mode == 'COMBINED': # Preview shader pipeline
         node_principled = nodes.new("ShaderNodeBsdfPrincipled")
@@ -415,7 +416,7 @@ class BakingSolution_UL_BakingGroup(bpy.types.UIList):
         #split.prop(item, 'target', text = "", emboss = False)
         #split.template_ID(item, 'target')
         #split.prop(item, 'sources', text = "") #split.label(text = "{} objects".format(item.sources))
-    
+
     def invoke(self, context, event):
         pass
 
@@ -424,25 +425,25 @@ def prop_defaults(layout, data, property, default_data, **kwargs):
     row.prop(data, property, **kwargs)
     op = row.operator('baking_solution.reset_node_prop', text = "", icon = 'LOOP_BACK', emboss = getattr(data, property) != getattr(default_data, property))
     op.prop = property
-    
+
 class LayoutBakingPanel(bpy.types.Panel):
     bl_label = "Baking Solution"
     bl_idname = "RENDER_PT_baking_solution"
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "render"
-    
+
     def draw(self, context):
         layout = self.layout
         settings = context.scene.baking_solution
         node_settings = settings.active_solution_settings
         node_defaults = settings.solution_defaults
-        
+
         if bpy.data.node_groups.get("BakingSolution") is None:
             box = layout.box()
             box.label(text = "Click this button to genereate solution node group", icon = 'INFO')
             box.operator("baking_solution.update_node_solution")
-        
+
         row = layout.row(align = True)
         row.template_list('BakingSolution_UL_BakingGroup', "", settings, "groups", settings, "group_index", rows=2)
         group = settings.active_group
@@ -468,26 +469,26 @@ class LayoutBakingPanel(bpy.types.Panel):
                     op_remove.remove_index = obj_id
                     obj_id += 1
             box.operator('baking_solution.add_selected_to_active_group', text = "Add Selected", icon = 'ADD')
-        
+
         col = layout.column(align = True)
         row = col.row(align = True)
         op_add = row.operator('baking_solution.add_group', text = "New Group", icon = 'ADD')
         op_remove = row.operator('baking_solution.remove_current_group', text = "Remove Group", icon = 'REMOVE')
         op_add_from_selected = col.operator('baking_solution.add_group', text = "New Group from Selected and Active", icon = 'ADD')
         op_add_from_selected.from_selected_and_active = True
-        
+
         row = layout.row()
         row.scale_y = 2
         row.operator('baking_solution.bake', text = "Bake Selected", icon = 'RENDER_STILL')
-        
+
         layout.label(text = "Solution Mode:")
         layout.prop(settings, 'solution_mode', expand = True)
-        
+
         if group is not None:
             image_target = getattr(group.image_targets, settings.solution_mode, None)
             if image_target is not None:
                 layout.prop(image_target, "image")
-        
+
         if settings.solution_mode == 'MASKS':
             layout.label(text = "Mask Channels:")
             box = layout.box()
@@ -516,8 +517,8 @@ class LayoutBakingPanel(bpy.types.Panel):
             layout.label(text = "Preview Settings:")
             box = layout.box()
             prop_defaults(box, node_settings, 'normal_preview_low_range', node_defaults)
-            
-        
+
+
 
 def register():
     bpy.utils.register_class(BakingSolutionImageTarget)
@@ -536,9 +537,9 @@ def register():
     bpy.utils.register_class(BakingSolution_UL_BakingGroup)
     bpy.utils.register_class(LayoutBakingPanel)
     bpy.types.Scene.baking_solution = bpy.props.PointerProperty(type = BakingSolutionSettings)
-    
+
     #update_solution()
-    
+
 def unregister():
     bpy.utils.unregister_class(BakingSolutionImageTarget)
     bpy.utils.unregister_class(BakingSolutionImageTargets)
@@ -555,6 +556,6 @@ def unregister():
     bpy.utils.unregister_class(OperatorUpdateNodeSolution)
     bpy.utils.unregister_class(BakingSolution_UL_BakingGroup)
     bpy.utils.unregister_class(LayoutBakingPanel)
-    
+
 if __name__ == "__main__":
     register()
