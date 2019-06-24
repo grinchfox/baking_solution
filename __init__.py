@@ -77,14 +77,14 @@ class BakingSolutionNodeSettings(bpy.types.PropertyGroup):
     normal_tangent_space: BoolProperty(name = "Tangent Space", default = True, update = property_update)
 
 class BakingSource(bpy.types.PropertyGroup):
-    object: PointerProperty(type = bpy.types.Object)
-    is_enabled: BoolProperty(default = True)
+    object: PointerProperty(type = bpy.types.Object, name = "Object")
+    is_enabled: BoolProperty(default = True, name = "Enable Bake", description = "Enable Bake")
 
 class BakingGroup(bpy.types.PropertyGroup):
     sources: CollectionProperty(type = BakingSource)
-    target: PointerProperty(type = bpy.types.Object)
-    cage_object: PointerProperty(type = bpy.types.Object)
-    cage_extrusion: FloatProperty(default = 0, soft_min = 0)
+    target: PointerProperty(type = bpy.types.Object, name = "Target")
+    cage_object: PointerProperty(type = bpy.types.Object, name = "Cage")
+    cage_extrusion: FloatProperty(default = 0, soft_min = 0, name = "Cage Extrusion")
     solution_settings: PointerProperty(type = BakingSolutionNodeSettings)
     image_targets: PointerProperty(type = BakingSolutionImageTargets)
 
@@ -114,31 +114,40 @@ class BakingSolutionSettings(bpy.types.PropertyGroup):
 
 # Operators
 
-class OperatorAddGroup(bpy.types.Operator):
-    bl_idname = 'baking_solution.add_group'
-    bl_label = "Baking Solution: Add group"
+class OperatorAddGroupFromSelectedAndActive(bpy.types.Operator):
+    bl_idname = 'baking_solution.add_group_from_selected_and_active'
+    bl_label = "Add Group from Selected and Active"
 
-    from_selected_and_active: BoolProperty(default = False)
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None
 
     def execute(self, context):
         settings = context.scene.baking_solution
         selection = context.selected_objects
         active = context.active_object
-        if self.from_selected_and_active and active is None:
-            return {'CANCEL'}
-
         new_group = settings.groups.add()
-        if self.from_selected_and_active:
-            new_group.target = active
-            for obj in selection:
-                if obj != active:
-                    newobj = new_group.sources.add()
-                    newobj.object = obj
+        new_group.target = active
+        for obj in selection:
+            if obj != active:
+                newobj = new_group.sources.add()
+                newobj.object = obj
+        return {'FINISHED'}
+
+class OperatorAddGroup(bpy.types.Operator):
+    bl_idname = 'baking_solution.add_group'
+    bl_label = "Add Group"
+    bl_options = {'INTERNAL'}
+
+    def execute(self, context):
+        settings = context.scene.baking_solution
+        settings.groups.add()
         return {'FINISHED'}
 
 class OperatorRemoveCurrentGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.remove_current_group'
-    bl_label = "Remove baking group"
+    bl_label = "Remove Group"
+    bl_options = {'INTERNAL'}
 
     @classmethod
     def poll(cls, context):
@@ -159,13 +168,14 @@ def add_object_to_sources(sources, object):
 
 class OperatorAddSelectedToActiveGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.add_selected_to_active_group'
-    bl_label = "Baking Solution: Add selected to active group"
+    bl_label = "Add Selected Object to Active Group"
+
+    @classmethod
+    def poll(cls, context):
+        return context.scene.baking_solution.active_group is not None
 
     def execute(self, context):
-        settings = context.scene.baking_solution
-        group = settings.groups[settings.group_index]
-        if group is None:
-            return {'ERROR', "No active group selected"}
+        group = context.scene.baking_solution.active_group
         for object in context.selected_objects:
             add_object_to_sources(group.sources, object)
         return {'FINISHED'}
@@ -173,6 +183,7 @@ class OperatorAddSelectedToActiveGroup(bpy.types.Operator):
 class OperatorRemoveFromActiveGroup(bpy.types.Operator):
     bl_idname = 'baking_solution.remove_from_active_group'
     bl_label = "Remove"
+    bl_options = {'INTERNAL'}
 
     remove_index: IntProperty(default = -1)
 
@@ -186,9 +197,16 @@ class OperatorRemoveFromActiveGroup(bpy.types.Operator):
         group.sources.remove(self.remove_index)
         return {'FINISHED'}
 
+def find_image_node(object, image):
+    for mat in object.data.materials:
+        for node in mat.node_tree.nodes:
+            if node.type == 'TEX_IMAGE' and node.image == image:
+                return node, mat
+    return None, None
+
 class OperatorBake(bpy.types.Operator):
     bl_idname = 'baking_solution.bake'
-    bl_label = "Bake"
+    bl_label = "Bake Selected Group"
 
     @classmethod
     def poll(cls, context):
@@ -199,25 +217,18 @@ class OperatorBake(bpy.types.Operator):
         render = context.scene.render
         group = settings.groups[settings.group_index]
         solution_settings = settings.active_solution_settings
-        #render.bake.use_selected_to_active = True
         bpy.ops.object.select_all(action='DESELECT')
         for source in group.sources:
             if source.object is not None:
                 source.object.select_set(source.is_enabled)
-            #for obj in context.scene.objects:
-            #    obj.select_set(source.object == obj)
-                #print("Select {} = {}".format(obj.name, obj == source.object))
-        #context.scene.objects_active = group.target
         group.target.select_set(True)
         context.view_layer.objects.active = group.target
         # Find target image and select its node
         target_image = getattr(group.image_targets, settings.solution_mode, None)
         if target_image is not None:
-            for mat in group.target.data.materials:
-                for node in mat.node_tree.nodes:
-                    if node.type == 'TEX_IMAGE' and node.image == target_image.image:
-                        mat.node_tree.nodes.active = node
-#        self.report({'INFO'}, "Baking...")
+            node, mat = find_image_node(group.target, target_image.image)
+            if node is not None:
+                mat.node_tree.nodes.active = node
         bpy.ops.object.bake('INVOKE_DEFAULT',
             type=solution_bake_modes[settings.solution_mode],
             use_selected_to_active = True,
@@ -235,8 +246,9 @@ class OperatorBake(bpy.types.Operator):
 class OperatorResetNodePropToDefaults(bpy.types.Operator):
     bl_idname = 'baking_solution.reset_node_prop'
     bl_label = "Reset"
+    bl_options = {'INTERNAL'}
 
-    prop = StringProperty()
+    prop: StringProperty()
 
     def execute(self, context):
         default_data = context.scene.baking_solution.solution_defaults
@@ -250,6 +262,16 @@ class OperatorUpdateNodeSolution(bpy.types.Operator):
 
     def execute(self, context):
         update_node_solution()
+        return {'FINISHED'}
+
+class OperatorSelectGroup(bpy.types.Operator):
+    bl_idname = 'baking_solution.select_group'
+    bl_label = "Select group"
+
+    select_id: IntProperty(default = -1)
+
+    def execute(self, context):
+        context.scene.baking_solution.group_index = self.select_id
         return {'FINISHED'}
 
 # Node Graph
@@ -406,16 +428,10 @@ def update_node_solution():
 
 class BakingSolution_UL_BakingGroup(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        #split = layout.split()
         if item.target is None:
             layout.label(text = "No Target")
         else:
-            #split.template_icon()
-            #split.icon(item.target)
-            layout.label(text = item.target.name, icon_value = layout.icon(item.target))#'OBJECT_DATA')
-        #split.prop(item, 'target', text = "", emboss = False)
-        #split.template_ID(item, 'target')
-        #split.prop(item, 'sources', text = "") #split.label(text = "{} objects".format(item.sources))
+            layout.label(text = item.target.name, icon_value = layout.icon(item.target))
 
     def invoke(self, context, event):
         pass
@@ -423,8 +439,9 @@ class BakingSolution_UL_BakingGroup(bpy.types.UIList):
 def prop_defaults(layout, data, property, default_data, **kwargs):
     row = layout.row()
     row.prop(data, property, **kwargs)
-    op = row.operator('baking_solution.reset_node_prop', text = "", icon = 'LOOP_BACK', emboss = getattr(data, property) != getattr(default_data, property))
-    op.prop = property
+    if data != default_data:
+        op = row.operator('baking_solution.reset_node_prop', text = "", icon = 'LOOP_BACK', emboss = getattr(data, property) != getattr(default_data, property))
+        op.prop = property
 
 class LayoutBakingPanel(bpy.types.Panel):
     bl_label = "Baking Solution"
@@ -445,14 +462,29 @@ class LayoutBakingPanel(bpy.types.Panel):
             box.operator("baking_solution.update_node_solution")
 
         row = layout.row(align = True)
-        row.template_list('BakingSolution_UL_BakingGroup', "", settings, "groups", settings, "group_index", rows=2)
+        #row.template_list('BakingSolution_UL_BakingGroup', "", settings, "groups", settings, "group_index", rows=2)
+        box = row.box()
+        group_list = box.column()
+        op_group = group_list.operator('baking_solution.select_group', text = "Defaults", icon = 'DOT', emboss = settings.group_index == -1)
+        op_group.select_id = -1
+        id = 0
+        for group in settings.groups:
+            is_selected = id == settings.group_index
+            if group.target is None:
+                op_group = group_list.operator('baking_solution.select_group', text = "None", icon = 'DOT', emboss = is_selected)
+                op_group.select_id = id
+            else:
+                op_group = group_list.operator('baking_solution.select_group', text = group.target.name, icon_value = layout.icon(group.target), emboss = is_selected)
+                op_group.select_id = id
+            id += 1
+
         group = settings.active_group
         if not group is None:
             box = row.box()
             box.alignment = 'EXPAND'
-            box.prop(group, 'target', text = "Target")
-            box.prop(group, 'cage_object', text = "Cage")
-            box.prop(group, 'cage_extrusion', text = "Cage Extrusion")
+            box.prop(group, 'target')
+            box.prop(group, 'cage_object')
+            box.prop(group, 'cage_extrusion')
             if len(group.sources) == 0:
                 box.label(text = "No source objects")
             else:
@@ -473,37 +505,37 @@ class LayoutBakingPanel(bpy.types.Panel):
         col = layout.column(align = True)
         row = col.row(align = True)
         op_add = row.operator('baking_solution.add_group', text = "New Group", icon = 'ADD')
-        op_remove = row.operator('baking_solution.remove_current_group', text = "Remove Group", icon = 'REMOVE')
-        op_add_from_selected = col.operator('baking_solution.add_group', text = "New Group from Selected and Active", icon = 'ADD')
-        op_add_from_selected.from_selected_and_active = True
+        op_remove = row.operator('baking_solution.remove_current_group', icon = 'REMOVE')
+        op_add_from_selected = col.operator('baking_solution.add_group_from_selected_and_active', icon = 'SHADERFX')
+
+        image_target = None
+        if group is not None:
+            image_target = getattr(group.image_targets, settings.solution_mode, None)
 
         row = layout.row()
         row.scale_y = 2
-        row.operator('baking_solution.bake', text = "Bake Selected", icon = 'RENDER_STILL')
+        row.operator('baking_solution.bake', icon = 'RENDER_STILL')
+        if group is not None and group.target is not None and image_target is not None:
+            node, mat = find_image_node(group.target, image_target.image)
+            if node is None:
+                box = layout.box()
+                box.label(text = "Warning: Unable to find image texture node for this image in target object", icon = 'ERROR')
 
         layout.label(text = "Solution Mode:")
         layout.prop(settings, 'solution_mode', expand = True)
 
-        if group is not None:
-            image_target = getattr(group.image_targets, settings.solution_mode, None)
-            if image_target is not None:
-                layout.prop(image_target, "image")
+        if image_target is not None:
+            layout.prop(image_target, "image")
 
         if settings.solution_mode == 'MASKS':
-            layout.label(text = "Mask Channels:")
             box = layout.box()
-            #row = box.row()
-            #row.label(text = "", icon = 'COLOR_RED')
+            box.label(text = "Mask Channels:")
             prop_defaults(box, node_settings, 'mask_r', node_defaults, text = "", icon = 'COLOR_RED', expand = False)
-            #row = box.row()
-            #row.label(text = "", icon = 'COLOR_GREEN')
             prop_defaults(box, node_settings, 'mask_g', node_defaults, text = "", icon = 'COLOR_GREEN', expand = False)
-            #row = box.row()
-            #row.label(text = "", icon = 'COLOR_BLUE')
             prop_defaults(box, node_settings, 'mask_b', node_defaults, text = "", icon = 'COLOR_BLUE', expand = False)
         elif settings.solution_mode == 'NORMAL':
-            layout.label(text = "Normal Channels:")
             box = layout.box()
+            box.label(text = "Normal Channels:")
             row = box.row()
             row.label(text = "", icon = 'COLOR_RED')
             prop_defaults(row, node_settings, 'normal_r', node_defaults, expand = True)
@@ -514,8 +546,8 @@ class LayoutBakingPanel(bpy.types.Panel):
             row.label(text = "", icon = 'COLOR_BLUE')
             prop_defaults(row, node_settings, 'normal_b', node_defaults, expand = True)
             prop_defaults(box, node_settings, 'normal_tangent_space', node_defaults, expand = True)
-            layout.label(text = "Preview Settings:")
             box = layout.box()
+            box.label(text = "Preview Settings:")
             prop_defaults(box, node_settings, 'normal_preview_low_range', node_defaults)
 
 
@@ -527,6 +559,7 @@ def register():
     bpy.utils.register_class(BakingSource)
     bpy.utils.register_class(BakingGroup)
     bpy.utils.register_class(BakingSolutionSettings)
+    bpy.utils.register_class(OperatorAddGroupFromSelectedAndActive)
     bpy.utils.register_class(OperatorAddGroup)
     bpy.utils.register_class(OperatorRemoveCurrentGroup)
     bpy.utils.register_class(OperatorAddSelectedToActiveGroup)
@@ -534,6 +567,7 @@ def register():
     bpy.utils.register_class(OperatorBake)
     bpy.utils.register_class(OperatorResetNodePropToDefaults)
     bpy.utils.register_class(OperatorUpdateNodeSolution)
+    bpy.utils.register_class(OperatorSelectGroup)
     bpy.utils.register_class(BakingSolution_UL_BakingGroup)
     bpy.utils.register_class(LayoutBakingPanel)
     bpy.types.Scene.baking_solution = bpy.props.PointerProperty(type = BakingSolutionSettings)
@@ -547,6 +581,7 @@ def unregister():
     bpy.utils.unregister_class(BakingSource)
     bpy.utils.unregister_class(BakingGroup)
     bpy.utils.unregister_class(BakingSolutionSettings)
+    bpy.utils.unregister_class(OperatorAddGroupFromSelectedAndActive)
     bpy.utils.unregister_class(OperatorAddGroup)
     bpy.utils.unregister_class(OperatorRemoveCurrentGroup)
     bpy.utils.unregister_class(OperatorAddSelectedToActiveGroup)
@@ -554,6 +589,7 @@ def unregister():
     bpy.utils.unregister_class(OperatorBake)
     bpy.utils.unregister_class(OperatorResetNodePropToDefaults)
     bpy.utils.unregister_class(OperatorUpdateNodeSolution)
+    bpy.utils.unregister_class(OperatorSelectGroup)
     bpy.utils.unregister_class(BakingSolution_UL_BakingGroup)
     bpy.utils.unregister_class(LayoutBakingPanel)
 
