@@ -29,13 +29,15 @@ enum_solution_modes = (
     ('COMBINED', "Combined", ''),
     ('DIFFUSE', "Diffuse", ''),
     ('MASKS', "Masks", ''),
-    ('NORMAL',"Normal",''))
+    ('NORMAL', "Normal", ''),
+    ('EMISSION', "Emission", ''))
 
 solution_bake_modes = {
     'COMBINED' : 'COMBINED',
     'DIFFUSE' : 'EMIT',
     'MASKS' : 'EMIT',
-    'NORMAL' : 'NORMAL'}
+    'NORMAL' : 'NORMAL',
+    'EMISSION' : 'EMIT' }
 
 enum_normal_direction = (
     ('POS_X', "+X", ''),
@@ -65,8 +67,11 @@ class BakingSolutionImageTargets(bpy.types.PropertyGroup):
     DIFFUSE: PointerProperty(type = BakingSolutionImageTarget)
     MASKS: PointerProperty(type = BakingSolutionImageTarget)
     NORMAL: PointerProperty(type = BakingSolutionImageTarget)
+    EMISSION: PointerProperty(type = BakingSolutionImageTarget)
 
 class BakingSolutionNodeSettings(bpy.types.PropertyGroup):
+    combined_emission_mul: FloatProperty(name = "Emission Multiplier", default = 1.0, update = property_update)
+    combined_emission_clamp: BoolProperty(name = "Clamp Emission", default = True, update = property_update)
     mask_r: EnumProperty(items = enum_channel_mask, default = 'AO', update = property_update)
     mask_g: EnumProperty(items = enum_channel_mask, default = 'ROUGHNESS', update = property_update)
     mask_b: EnumProperty(items = enum_channel_mask, default = 'METALLIC', update = property_update)
@@ -210,6 +215,8 @@ class OperatorBake(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
+        if context.scene.render.engine != 'CYCLES':
+            return False
         return context.scene.baking_solution.active_group is not None
 
     def execute(self, context):
@@ -217,7 +224,8 @@ class OperatorBake(bpy.types.Operator):
         render = context.scene.render
         group = settings.groups[settings.group_index]
         solution_settings = settings.active_solution_settings
-        bpy.ops.object.select_all(action='DESELECT')
+        bpy.ops.object.mode_set(mode = 'OBJECT')
+        bpy.ops.object.select_all(action = 'DESELECT')
         for source in group.sources:
             if source.object is not None:
                 source.object.select_set(source.is_enabled)
@@ -314,6 +322,8 @@ def update_node_solution():
     in_metallic.default_value = 0.0
     in_metallic.min_value = 0.0
     in_metallic.max_value = 1.0
+    in_emission = tree_get_or_create(inputs, "NodeSocketColor", "Emission")
+    in_emission.default_value = (0.0, 0.0, 0.0, 1.0)
     out_shader = tree_get_or_create(outputs, "NodeSocketShader", "Shader")
     #print(node_bake_solution.inputs.keys())
     node_in = nodes.new("NodeGroupInput")
@@ -325,9 +335,25 @@ def update_node_solution():
         node_principled = nodes.new("ShaderNodeBsdfPrincipled")
         node_principled.location = (300,0)
         node_principled.label = "Preview"
+            
+        node_emission_mul = nodes.new("ShaderNodeMixRGB")
+        node_emission_mul.blend_type = 'MULTIPLY'
+        node_emission_mul.inputs[0].default_value = 1.0
+        if solution_settings.combined_emission_clamp:
+            node_emission_clamp = nodes.new("ShaderNodeMixRGB")
+            node_emission_clamp.blend_type = 'MULTIPLY'
+            node_emission_clamp.inputs[0].default_value = 0.0
+            node_emission_clamp.use_clamp = True
+            links.new(node_in.outputs[in_emission.name], node_emission_clamp.inputs[1])
+            links.new(node_emission_clamp.outputs[0], node_emission_mul.inputs[1])
+        else:
+            links.new(node_in.outputs[in_emission.name], node_emission_mul.inputs[1])
+        emit_mul = solution_settings.combined_emission_mul
+        node_emission_mul.inputs[2].default_value = (emit_mul, emit_mul, emit_mul, 1.0)
         links.new(node_in.outputs[in_diffuse.name], node_principled.inputs["Base Color"])
         links.new(node_in.outputs[in_roughness.name], node_principled.inputs["Roughness"])
         links.new(node_in.outputs[in_metallic.name], node_principled.inputs["Metallic"])
+        links.new(node_emission_mul.outputs[0], node_principled.inputs["Emission"])
         links.new(node_out.inputs[out_shader.name], node_principled.outputs["BSDF"])
     elif mode == 'DIFFUSE': # Diffuse bake shader pipeline (it is needed because metallic kills diffuse)
         node_emit = nodes.new("ShaderNodeEmission")
@@ -423,6 +449,8 @@ def update_node_solution():
             links.new(node_emit.inputs["Color"], node_combine.outputs["Image"])
         links.new(node_emit.outputs["Emission"], node_out.inputs[out_shader.name])
         pass
+    elif mode == 'EMISSION': # Normal map preview
+        links.new(node_in.outputs[in_emission.name], node_out.inputs[out_shader.name])
     else:
         raise Exception("Unknown solution mode {}".format(mode))
 
@@ -515,11 +543,16 @@ class LayoutBakingPanel(bpy.types.Panel):
         row = layout.row()
         row.scale_y = 2
         row.operator('baking_solution.bake', icon = 'RENDER_STILL')
-        if group is not None and group.target is not None and image_target is not None:
+        
+        if context.scene.render.engine != 'CYCLES':
+            box = layout.box()
+            box.label(text = "This addon can only bake with cycles. Change render settings.", icon = 'ERROR')
+        
+        if group is not None and group.target is not None and image_target is not None and image_target.image is not None:
             node, mat = find_image_node(group.target, image_target.image)
             if node is None:
                 box = layout.box()
-                box.label(text = "Warning: Unable to find image texture node for this image in target object", icon = 'ERROR')
+                box.label(text = "Unable to find Image Texture Node for this image", icon = 'ERROR')
 
         layout.label(text = "Solution Mode:")
         layout.prop(settings, 'solution_mode', expand = True)
@@ -527,7 +560,12 @@ class LayoutBakingPanel(bpy.types.Panel):
         if image_target is not None:
             layout.prop(image_target, "image")
 
-        if settings.solution_mode == 'MASKS':
+        if settings.solution_mode == 'COMBINED':
+            box = layout.box()
+            box.label(text = "Preview Settings:")
+            prop_defaults(box, node_settings, 'combined_emission_mul', node_defaults)
+            prop_defaults(box, node_settings, 'combined_emission_clamp', node_defaults)
+        elif settings.solution_mode == 'MASKS':
             box = layout.box()
             box.label(text = "Mask Channels:")
             prop_defaults(box, node_settings, 'mask_r', node_defaults, text = "", icon = 'COLOR_RED', expand = False)
