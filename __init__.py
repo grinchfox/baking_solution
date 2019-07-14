@@ -210,45 +210,45 @@ def find_image_node(object, image):
                 return node, mat
     return None, None
 
-""" Thanks 
+""" Thanks
 https://devtalk.blender.org/t/question-about-ui-lock-ups-when-running-a-python-script/6406/8 """
 
 def init_bake_macro():
-    
+
     class BAKING_SOLUTION_OT_bake_macro(bpy.types.Macro):
         bl_idname = "baking_solution.bake_macro"
         bl_label = "Bake Macro"
         bl_options = {'INTERNAL'}
-    
+
     class BAKING_SOLUTION_OT_set_bake_finished(bpy.types.Operator):
         bl_idname = "baking_solution.set_bake_finished"
         bl_label = "Bake Set Finished"
         bl_options = {'INTERNAL'}
-        
+
         def execute(self, context):
             dns = bpy.app.driver_namespace
             dns['bake_set_finished'] = True
             return {'FINISHED'}
-    
+
     if hasattr(bpy.types, 'BAKING_SOLUTION_OT_bake_macro'):
         bpy.utils.unregister_class(bpy.types.BAKING_SOLUTION_OT_bake_macro)
-        
+
     bpy.utils.register_class(BAKING_SOLUTION_OT_bake_macro)
     if not hasattr(bpy.types, 'BAKING_SOLUTION_OT_set_bake_finished'):
         bpy.utils.register_class(BAKING_SOLUTION_OT_set_bake_finished)
-        
+
     return bpy.types.BAKING_SOLUTION_OT_bake_macro
 
 class BAKING_SOLUTION_OT_pre_bake(bpy.types.Operator):
     bl_idname = 'baking_solution.pre_bake'
     bl_label = "Pre Bake"
     bl_options = {'INTERNAL'}
-    
+
     image = None
     scale_w = 0
     scale_h = 0
     do_rescale = False
-    
+
     def execute(self, context):
         print("Pre-Bake stage")
         if self.do_rescale:
@@ -257,17 +257,17 @@ class BAKING_SOLUTION_OT_pre_bake(bpy.types.Operator):
             self.image.scale(self.scale_w, self.scale_h)
             print("Resolution after upscale: {} {}".format(self.image.size[0], self.image.size[1]))
         return {'FINISHED'}
-    
+
 class BAKING_SOLUTION_OT_post_bake(bpy.types.Operator):
     bl_idname = 'baking_solution.post_bake'
     bl_label = "Post Bake"
     bl_options = {'INTERNAL'}
-    
+
     image = None
     scale_w = 0
     scale_h = 0
     do_rescale = False
-    
+
     def execute(self, context):
         print("Post-Bake stage")
         if self.do_rescale:
@@ -280,7 +280,7 @@ class BAKING_SOLUTION_OT_post_bake(bpy.types.Operator):
 class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
     bl_idname = 'baking_solution.bake_modal'
     bl_label = 'Bake'
-    
+
     @classmethod
     def poll(cls, context):
         if bpy.app.driver_namespace.get('bake_set_finished') is not None:
@@ -297,7 +297,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
             del bpy.app.driver_namespace['bake_set_finished']
             return {'FINISHED'}
         return {'PASS_THROUGH'}
-    
+
     def invoke(self, context, event):
         settings = context.scene.baking_solution
         render = context.scene.render
@@ -316,20 +316,20 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
             node, mat = find_image_node(group.target, target_image.image)
             if node is not None:
                 mat.node_tree.nodes.active = node
-        
+
         macro = init_bake_macro()
-        
+
         dns = bpy.app.driver_namespace
         dns['bake_set_finished'] = False
         self.dns = dns
-        
+
         define = _bpy.ops.macro_define
-        
+
         aa_scale = settings.aa_scale
         print(settings.aa_scale)
-        
+
         original_w, original_h = 1, 1
-        
+
         prebake = BAKING_SOLUTION_OT_pre_bake
         prebake.do_rescale = False
         if target_image is not None and aa_scale != 1:
@@ -341,7 +341,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
 
         bake = macro.define('OBJECT_OT_bake')
         bake_props = bake.properties
-        
+
         bake_props.type=solution_bake_modes[settings.solution_mode]
         bake_props.use_selected_to_active = True
         bake_props.cage_extrusion = group.cage_extrusion
@@ -352,7 +352,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
         bake_props.normal_space = solution_settings.normal_tangent_space and 'TANGENT' or 'OBJECT'
         bake_props.cage_object = group.cage_object and group.cage_object.name or ""
         bake_props.use_cage = group.cage_object is not None
-        
+
         postbake = BAKING_SOLUTION_OT_post_bake
         postbake.do_rescale = False
         if target_image is not None and aa_scale != 1:
@@ -361,11 +361,11 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
             postbake.scale_h = target_image.image.size[1]
             postbake.do_rescale = True
         macro.define('BAKING_SOLUTION_OT_post_bake')
-        
+
         define(macro, 'BAKING_SOLUTION_OT_set_bake_finished')
-        
+
         bpy.ops.baking_solution.bake_macro('INVOKE_DEFAULT')
-        
+
         wm = context.window_manager
         self.refresh = wm.event_timer_add(0.1, window=context.window)
         wm.modal_handler_add(self)
@@ -456,7 +456,7 @@ def update_node_solution():
         node_principled = nodes.new("ShaderNodeBsdfPrincipled")
         node_principled.location = (300,0)
         node_principled.label = "Preview"
-            
+
         node_emission_mul = nodes.new("ShaderNodeMixRGB")
         node_emission_mul.blend_type = 'MULTIPLY'
         node_emission_mul.inputs[0].default_value = 1.0
@@ -575,16 +575,6 @@ def update_node_solution():
     else:
         raise Exception("Unknown solution mode {}".format(mode))
 
-class BakingSolution_UL_BakingGroup(bpy.types.UIList):
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        if item.target is None:
-            layout.label(text = "No Target")
-        else:
-            layout.label(text = item.target.name, icon_value = layout.icon(item.target))
-
-    def invoke(self, context, event):
-        pass
-
 def prop_defaults(layout, data, property, default_data, **kwargs):
     row = layout.row()
     row.prop(data, property, **kwargs)
@@ -610,8 +600,6 @@ class LayoutBakingPanel(bpy.types.Panel):
             box.label(text = "Click this button to genereate solution node group", icon = 'INFO')
             box.operator("baking_solution.update_node_solution")
 
-        #row = layout.row(align = True)
-        #row.template_list('BakingSolution_UL_BakingGroup', "", settings, "groups", settings, "group_index", rows=2)
         layout.label(text = "Groups:")
         box = layout.box()
         group_list = box.column()
@@ -627,7 +615,7 @@ class LayoutBakingPanel(bpy.types.Panel):
                 op_group = group_list.operator('baking_solution.select_group', text = group.target.name, icon_value = layout.icon(group.target), emboss = is_selected)
                 op_group.select_id = id
             id += 1
-            
+
         col = layout.column(align = True)
         row = col.row(align = True)
         op_add = row.operator('baking_solution.add_group', text = "New Group", icon = 'ADD')
@@ -672,11 +660,11 @@ class LayoutBakingPanel(bpy.types.Panel):
         row = layout.row()
         row.scale_y = 2
         row.operator('baking_solution.bake_modal', icon = 'RENDER_STILL')
-        
+
         if context.scene.render.engine != 'CYCLES':
             box = layout.box()
             box.label(text = "This addon can only bake with cycles. Change render settings.", icon = 'ERROR')
-        
+
         if group is not None and group.target is not None and image_target is not None and image_target.image is not None:
             node, mat = find_image_node(group.target, image_target.image)
             if node is None:
@@ -737,7 +725,6 @@ def register():
     bpy.utils.register_class(OperatorResetNodePropToDefaults)
     bpy.utils.register_class(OperatorUpdateNodeSolution)
     bpy.utils.register_class(OperatorSelectGroup)
-    bpy.utils.register_class(BakingSolution_UL_BakingGroup)
     bpy.utils.register_class(LayoutBakingPanel)
     bpy.types.Scene.baking_solution = bpy.props.PointerProperty(type = BakingSolutionSettings)
 
@@ -761,7 +748,6 @@ def unregister():
     bpy.utils.unregister_class(OperatorResetNodePropToDefaults)
     bpy.utils.unregister_class(OperatorUpdateNodeSolution)
     bpy.utils.unregister_class(OperatorSelectGroup)
-    bpy.utils.unregister_class(BakingSolution_UL_BakingGroup)
     bpy.utils.unregister_class(LayoutBakingPanel)
 
 if __name__ == "__main__":
