@@ -90,8 +90,12 @@ class BakingLayer(bpy.types.PropertyGroup):
     target: PointerProperty(type = bpy.types.Object, name = "Target")
     cage_object: PointerProperty(type = bpy.types.Object, name = "Cage")
     cage_extrusion: FloatProperty(default = 0, soft_min = 0, name = "Cage Extrusion")
+    enabled: BoolProperty(default = True, name = "Enabled")
+
+    ui_unfold: BoolProperty(name = "Unfold group", default = False)
 
 class BakingGroup(bpy.types.PropertyGroup):
+    name: StringProperty(name = "Name", default = "Group")
     layers: CollectionProperty(type = BakingLayer, name = "Layers")
     layer_index: IntProperty(name = "Selected Layer")
 #   sources: CollectionProperty(type = BakingSource)
@@ -100,6 +104,8 @@ class BakingGroup(bpy.types.PropertyGroup):
 #   cage_extrusion: FloatProperty(default = 0, soft_min = 0, name = "Cage Extrusion")
     solution_settings: PointerProperty(type = BakingSolutionNodeSettings)
     image_targets: PointerProperty(type = BakingSolutionImageTargets)
+
+    ui_unfold: BoolProperty(name = "Unfold group", default = False)
 
     @property
     def active_layer(self):
@@ -646,6 +652,7 @@ class LayoutSolutionSettings(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        layout.use_property_split = False
         layout.alignment = 'RIGHT'
         settings = context.scene.baking_solution
         node_settings = settings.active_solution_settings
@@ -686,6 +693,7 @@ class LayoutBakingSettings(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        layout.use_property_split = False
         layout.alignment = 'RIGHT'
         settings = context.scene.baking_solution
         layout.prop(settings, "aa_scale")
@@ -701,6 +709,7 @@ class LayoutBakingPanel(bpy.types.Panel):
     def draw(self, context):
 
         layout = self.layout
+        layout.use_property_split = False
         settings = context.scene.baking_solution
         node_settings = settings.active_solution_settings
         node_defaults = settings.solution_defaults
@@ -715,54 +724,121 @@ class LayoutBakingPanel(bpy.types.Panel):
         layout.label(text = "Groups:")
         box = layout.box()
         groups_row = box.row()
-        group_list = groups_row.column()
+        group_list = groups_row.column(align = True)
         op_group = group_list.operator('baking_solution.select_group', text = "Defaults", icon = 'SETTINGS', emboss = settings.group_index == -1)
         op_group.select_id = -1
-        index = 0
+        group_index = 0
         for group in settings.groups:
-            is_selected = index == settings.group_index
-            op_group = group_list.operator('baking_solution.select_group', text = "Group", icon = 'DOT', emboss = is_selected)
-            op_group.select_id = index
-#           if group.target is None:
-#               op_group = group_list.operator('baking_solution.select_group', text = "None", icon = 'DOT', emboss = is_selected)
-#               op_group.select_id = index
-#           else:
-#               op_group = group_list.operator('baking_solution.select_group', text = group.target.name, icon_value = layout.icon(group.target), emboss = is_selected)
-#               op_group.select_id = index
-            index += 1
+            groups_box = group_list.column(align = True)
+            group_is_selected = group_index == settings.group_index
+            group_header = groups_box.row(align = True)
+            if not group_is_selected:
+                group_header.emboss = 'PULLDOWN_MENU'
+
+            group_header.prop(group, "ui_unfold", text = "", icon = group.ui_unfold and 'DISCLOSURE_TRI_DOWN' or 'DISCLOSURE_TRI_RIGHT', emboss = group_is_selected)
+
+            op_group = group_header.operator('baking_solution.select_group', text = group.name, emboss = True)
+            op_group.select_id = group_index
+
+            if group_is_selected:
+                op_remove = group_header.operator('baking_solution.remove_current_group', text = "", icon = 'TRASH', emboss = group_is_selected)
+
+            if group.ui_unfold:
+                group_props = groups_box.box()
+                layers_row = group_props.row(align = False)
+                group_props.separator_spacer()
+                #layers_row.label(text = "", icon = 'RENDERLAYERS')
+                op_add = layers_row.operator('baking_solution.add_layer', text = "", icon = 'RENDERLAYERS')
+                layer_list = layers_row.column(align = True)
+                #layers_header = layer_list.row(align = True)
+                #layers_header.label(text = "Layers")
+                #op_remove = layers_header.operator('baking_solution.remove_layer', icon = 'REMOVE')
+
+                layer_index = 0
+                for layer in group.layers:
+                    layer_is_selected = layer_index == group.layer_index and group_is_selected
+                    target = layer.target
+                    layer_col = layer_list.column(align = True)
+                    layer_row = layer_col.row(align = True)
+                    if not layer_is_selected:
+                        layer_row.emboss = 'PULLDOWN_MENU'
+                    layer_row.prop(layer, "ui_unfold", text = "", icon = layer.ui_unfold and 'DISCLOSURE_TRI_DOWN' or 'DISCLOSURE_TRI_RIGHT', emboss = layer_is_selected)
+                    #layer_row.label(text = "{}:".format(group_index))
+                    if target is not None:
+                        icon = layout.icon(target)
+                        op_layer = layer_row.operator('baking_solution.select_layer', text = target.name, emboss = True, icon_value = icon)
+                        op_layer.select_id = layer_index
+                    else:
+                        op_layer = layer_row.operator('baking_solution.select_layer', text = "Empty Layer", emboss = True)
+                        op_layer.select_id = layer_index
+                    layer_row.prop(layer, "enabled", text = "", icon = layer.enabled and 'RESTRICT_RENDER_OFF' or 'RESTRICT_RENDER_ON', emboss = layer_is_selected)
+                    #op_move_up = layer_row.operator('baking_solution.remove_layer', text = "", icon = 'TRIA_UP', emboss = layer_is_selected)
+                    #op_move_down = layer_row.operator('baking_solution.remove_layer', text = "", icon = 'TRIA_DOWN', emboss = layer_is_selected)
+                    op_remove = layer_row.operator('baking_solution.remove_layer', text = "", icon = 'TRASH', emboss = layer_is_selected)
+
+                    if layer.ui_unfold:
+                        layer_box = layer_col.box()
+                        layer_split = layer_box.row(align = True)
+                        #layer_split.label(text = "", icon = 'BLANK1')
+                        layer_split.operator('baking_solution.add_selected_to_active_group', text = "", icon = 'ADD')
+                        object_list = layer_split.column(align = True)
+                        layer_box.separator_spacer()
+                        #object_list_header = object_list.row()
+                        #object_list_header.label(text = "Sources")
+                        #object_list_header.operator('baking_solution.add_selected_to_active_group', text = "", icon = 'ADD')
+                        if len(layer.sources) > 0:
+                            obj_id = 0
+                            for source in layer.sources:
+                                object_row = object_list.row(align = True)
+                                object_row.label(text = source.object.name, icon_value = layout.icon(source.object))#'OBJECT_DATA')
+                                object_row.prop(source, 'is_enabled', text="", icon = source.is_enabled and 'RESTRICT_RENDER_OFF' or 'RESTRICT_RENDER_ON', emboss = False)
+                                op_remove = object_row.operator('baking_solution.remove_from_active_group', text = "", icon = 'TRASH', emboss = False)
+                                op_remove.remove_index = obj_id
+                                obj_id += 1
+                        else:
+                            object_list.alert = True
+                            object_list.label(text = "No reference objects added")
+
+                    layer_index += 1
+            group_index += 1
 
         col = groups_row.column(align = True)
         #row = col.row(align = True)
         op_add = col.operator('baking_solution.add_group', text = "", icon = 'ADD')
-        op_remove = col.operator('baking_solution.remove_current_group', text = "", icon = 'REMOVE')
+        #op_remove = col.operator('baking_solution.remove_current_group', text = "", icon = 'REMOVE')
         op_add_from_selected = col.operator('baking_solution.add_group_from_selected_and_active', text = "", icon = 'SHADERFX')
 
 # Current selected group
 
         group = settings.active_group
         if group is not None:
+
+# Group properties
+            layout.label(text = "Group:")
+            layout.prop(group, "name")
+
 # Layers
-            layout.label(text = "Layers:")
-            box = layout.box()
-            row = box.row()
-            layer_list = row.column()
-            index = 0
-            for layer in group.layers:
-                is_selected = index == group.layer_index
-                target = layer.target
-                layer_row = layer_list.row(align = True)
-                #layer_row.label(text = "{}:".format(index))
-                if target is not None:
-                    icon = layout.icon(target)
-                    op_layer = layer_row.operator('baking_solution.select_layer', text = target.name, emboss = is_selected, icon_value = icon)
-                    op_layer.select_id = index
-                else:
-                    op_layer = layer_row.operator('baking_solution.select_layer', text = "Layer {}".format(index), emboss = is_selected)
-                    op_layer.select_id = index
-                index += 1
-            col = row.column(align = True)
-            op_add = col.operator('baking_solution.add_layer', text = "", icon = 'ADD')
-            op_remove = col.operator('baking_solution.remove_layer', text = "", icon = 'REMOVE')
+#           layout.label(text = "Layers:")
+#           box = layout.box()
+#           row = box.row()
+#           layer_list = row.column()
+#           index = 0
+#           for layer in group.layers:
+#               is_selected = index == group.layer_index
+#               target = layer.target
+#               layer_row = layer_list.row(align = True)
+#               #layer_row.label(text = "{}:".format(index))
+#               if target is not None:
+#                   icon = layout.icon(target)
+#                   op_layer = layer_row.operator('baking_solution.select_layer', text = target.name, emboss = is_selected, icon_value = icon)
+#                   op_layer.select_id = index
+#               else:
+#                   op_layer = layer_row.operator('baking_solution.select_layer', text = "Layer {}".format(index), emboss = is_selected)
+#                   op_layer.select_id = index
+#               index += 1
+#           col = row.column(align = True)
+#           op_add = col.operator('baking_solution.add_layer', text = "", icon = 'ADD')
+#           op_remove = col.operator('baking_solution.remove_layer', text = "", icon = 'REMOVE')
 
 # Selected layer properties
 
@@ -775,22 +851,22 @@ class LayoutBakingPanel(bpy.types.Panel):
                 layout.prop(layer, 'cage_object')
                 layout.prop(layer, 'cage_extrusion')
                 #row = layout.row()
-                layout.label(text = "Source objects:")
-                object_box = layout.box()
-                object_box_row = object_box.row()
-                object_list = object_box_row.column()
-                if len(layer.sources) == 0:
-                    object_list.label(text = "None")
-                else:
-                    obj_id = 0
-                    for source in layer.sources:
-                        object_row = object_list.row(align = True)
-                        object_row.label(text = source.object.name, icon_value = layout.icon(source.object))#'OBJECT_DATA')
-                        object_row.prop(source, 'is_enabled', text="", icon = source.is_enabled and 'RESTRICT_RENDER_OFF' or 'RESTRICT_RENDER_ON', emboss = False)
-                        op_remove = object_row.operator('baking_solution.remove_from_active_group', text = "", icon = 'X', emboss = False)
-                        op_remove.remove_index = obj_id
-                        obj_id += 1
-                object_box_row.operator('baking_solution.add_selected_to_active_group', text = "", icon = 'ADD')
+#               layout.label(text = "Source objects:")
+#               object_box = layout.box()
+#               object_box_row = object_box.row()
+#               object_list = object_box_row.column()
+#               if len(layer.sources) == 0:
+#                   object_list.label(text = "None")
+#               else:
+#                   obj_id = 0
+#                   for source in layer.sources:
+#                       object_row = object_list.row(align = True)
+#                       object_row.label(text = source.object.name, icon_value = layout.icon(source.object))#'OBJECT_DATA')
+#                       object_row.prop(source, 'is_enabled', text="", icon = source.is_enabled and 'RESTRICT_RENDER_OFF' or 'RESTRICT_RENDER_ON', emboss = False)
+#                       op_remove = object_row.operator('baking_solution.remove_from_active_group', text = "", icon = 'X', emboss = False)
+#                       op_remove.remove_index = obj_id
+#                       obj_id += 1
+#               object_box_row.operator('baking_solution.add_selected_to_active_group', text = "", icon = 'ADD')
 
 # Bake button
 
@@ -800,6 +876,7 @@ class LayoutBakingPanel(bpy.types.Panel):
 
         if context.scene.render.engine != 'CYCLES':
             box = layout.box()
+            box.alert = True
             box.label(text = "This addon can only bake with Cycles Render Engine", icon = 'ERROR')
 
 # Target image warnings
