@@ -748,7 +748,7 @@ class LayoutBakingPanel(bpy.types.Panel):
                 layers_row = group_props.row(align = False)
                 group_props.separator_spacer()
                 #layers_row.label(text = "", icon = 'RENDERLAYERS')
-                op_add = layers_row.operator('baking_solution.add_layer', text = "", icon = 'RENDERLAYERS')
+                op_add = layers_row.operator('baking_solution.add_layer', text = "", icon = 'ADD', emboss = False)
                 layer_list = layers_row.column(align = True)
                 #layers_header = layer_list.row(align = True)
                 #layers_header.label(text = "Layers")
@@ -777,10 +777,11 @@ class LayoutBakingPanel(bpy.types.Panel):
                     op_remove = layer_row.operator('baking_solution.remove_layer', text = "", icon = 'TRASH', emboss = layer_is_selected)
 
                     if layer.ui_unfold:
-                        layer_box = layer_col.box()
-                        layer_split = layer_box.row(align = True)
+                        layer_box = layer_col.column()
+                        layer_split = layer_box.row(align = False)
                         #layer_split.label(text = "", icon = 'BLANK1')
-                        layer_split.operator('baking_solution.add_selected_to_active_group', text = "", icon = 'ADD')
+                        layer_split.separator(factor = 2)
+                        layer_split.operator('baking_solution.add_selected_to_active_group', text = "", icon = 'ADD', emboss = False)
                         object_list = layer_split.column(align = True)
                         layer_box.separator_spacer()
                         #object_list_header = object_list.row()
