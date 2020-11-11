@@ -439,6 +439,10 @@ def update_node_solution():
     in_roughness.default_value = 0.5
     in_roughness.min_value = 0.0
     in_roughness.max_value = 1.0
+    in_ao = tree_get_or_create(inputs, "NodeSocketFloat", "AO")
+    in_ao.default_value = 1.0
+    in_ao.min_value = 0.0
+    in_ao.max_value = 1.0
     in_metallic = tree_get_or_create(inputs, "NodeSocketFloat", "Metallic")
     in_metallic.default_value = 0.0
     in_metallic.min_value = 0.0
@@ -484,12 +488,17 @@ def update_node_solution():
     elif mode == 'MASKS': # Masks bake shader pipeline
         node_ao = nodes.new("ShaderNodeAmbientOcclusion")
         node_ao.location = (300,-200)
+        node_mixao = nodes.new("ShaderNodeMath")
+        node_mixao.location = (500,-200)
+        node_mixao.operation = 'MULTIPLY'
+        links.new(node_mixao.inputs[0], node_ao.outputs["AO"])
+        links.new(node_mixao.inputs[1], node_in.outputs[in_ao.name])
         node_combine = nodes.new("ShaderNodeCombineRGB")
-        node_combine.location = (500,0)
+        node_combine.location = (700,0)
         out_links = {
             'ROUGHNESS': node_in.outputs[in_roughness.name],
             'METALLIC': node_in.outputs[in_metallic.name],
-            'AO': node_ao.outputs["AO"]}
+            'AO': node_mixao.outputs[0]}
         if solution_settings.mask_r != 'NONE':
             links.new(out_links[solution_settings.mask_r], node_combine.inputs["R"])
         if solution_settings.mask_g != 'NONE':
