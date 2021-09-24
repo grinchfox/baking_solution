@@ -90,6 +90,7 @@ class BakingGroup(bpy.types.PropertyGroup):
     target: PointerProperty(type = bpy.types.Object, name = "Target")
     cage_object: PointerProperty(type = bpy.types.Object, name = "Cage")
     cage_extrusion: FloatProperty(default = 0, soft_min = 0, name = "Cage Extrusion")
+    max_ray_distance: FloatProperty(default = 0, soft_min = 0, name = "Ray length")
     solution_settings: PointerProperty(type = BakingSolutionNodeSettings)
     image_targets: PointerProperty(type = BakingSolutionImageTargets)
 
@@ -345,6 +346,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
         bake_props.type=solution_bake_modes[settings.solution_mode]
         bake_props.use_selected_to_active = True
         bake_props.cage_extrusion = group.cage_extrusion
+        bake_props.max_ray_distance = group.max_ray_distance
         bake_props.use_clear = True
         bake_props.normal_r = solution_settings.normal_r
         bake_props.normal_g = solution_settings.normal_g
@@ -639,6 +641,7 @@ class LayoutBakingPanel(bpy.types.Panel):
             box.prop(group, 'target')
             box.prop(group, 'cage_object')
             box.prop(group, 'cage_extrusion')
+            box.prop(group, 'max_ray_distance')
             row = box.row()
             row.label(text = "Source objects:")
             row.operator('baking_solution.add_selected_to_active_group', text = "Add Selected", icon = 'ADD')
