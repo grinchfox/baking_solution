@@ -1,7 +1,40 @@
 # (c) grinchfox 2019
 
-import bpy, _bpy
-from bpy.props import *
+# pyright: reportInvalidTypeForm=false
+
+from __future__ import annotations
+from typing import Type, TypeVar
+from typing import cast
+
+import bpy
+from bpy.props import (
+    BoolProperty,
+    CollectionProperty,
+    EnumProperty,
+    FloatProperty,
+    IntProperty,
+    PointerProperty,
+    StringProperty,
+)
+from bpy.types import (
+    NodeSocketColor,
+    NodeSocketFloat,
+    NodeTreeInterfaceSocket,
+    NodeTreeInterfaceSocketColor,
+    NodeTreeInterfaceSocketFloat,
+    NodeTreeInterfaceSocketShader,
+    NodeTreeInterfaceSocketVector,
+    ShaderNodeAmbientOcclusion,
+    ShaderNodeEmission,
+    ShaderNodeMath,
+    ShaderNodeMixRGB,
+    ShaderNodeNewGeometry,
+    ShaderNodeSeparateXYZ,
+    ShaderNodeVectorMath,
+)
+
+import _bpy
+
 
 bl_info = {
     "name": "Baking Solution",
@@ -105,8 +138,17 @@ class BakingSolutionSettings(bpy.types.PropertyGroup):
     solution_defaults: PointerProperty(type = BakingSolutionNodeSettings)
     aa_scale: FloatProperty(name = "AA Scale", default = 1.0, min = 1.0, max = 8.0, step = 50)
 
+    @classmethod
+    def from_scene(cls, scene: bpy.types.Scene) -> BakingSolutionSettings:
+        return cast(BakingSolutionSettings, scene.baking_solution)  # pyright: ignore
+
+    @classmethod
+    def register_in_scene_class(cls):
+        # TODO: Find better way to register stuff in scene that is okay with pyright ?
+        bpy.types.Scene.baking_solution = bpy.props.PointerProperty(type = BakingSolutionSettings)  # pyright: ignore
+
     @property
-    def active_group(self):
+    def active_group(self) -> BakingGroup | None:
         if self.group_index < 0 or self.group_index >= len(self.groups):
             return None
         return self.groups[self.group_index]
@@ -126,11 +168,11 @@ class OperatorAddGroupFromSelectedAndActive(bpy.types.Operator):
     bl_label = "Add Group from Selected and Active"
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context):  # pyright: ignore
         return context.active_object is not None
 
     def execute(self, context):
-        settings = context.scene.baking_solution
+        settings = BakingSolutionSettings.from_scene(context.scene) #.baking_solution
         selection = context.selected_objects
         active = context.active_object
         new_group = settings.groups.add()
@@ -147,7 +189,7 @@ class OperatorAddGroup(bpy.types.Operator):
     bl_options = {'INTERNAL'}
 
     def execute(self, context):
-        settings = context.scene.baking_solution
+        settings = BakingSolutionSettings.from_scene(context.scene) #.baking_solution
         settings.groups.add()
         return {'FINISHED'}
 
@@ -157,11 +199,11 @@ class OperatorRemoveCurrentGroup(bpy.types.Operator):
     bl_options = {'INTERNAL'}
 
     @classmethod
-    def poll(cls, context):
-        return context.scene.baking_solution.active_group is not None
+    def poll(cls, context):  # pyright: ignore
+        return BakingSolutionSettings.from_scene(context.scene).active_group is not None
 
     def execute(self, context):
-        settings = context.scene.baking_solution
+        settings = BakingSolutionSettings.from_scene(context.scene)
         settings.groups.remove(settings.group_index)
         return {'FINISHED'}
 
@@ -178,11 +220,12 @@ class OperatorAddSelectedToActiveGroup(bpy.types.Operator):
     bl_label = "Add Selected Object to Active Group"
 
     @classmethod
-    def poll(cls, context):
-        return context.scene.baking_solution.active_group is not None
+    def poll(cls, context):  # pyright: ignore
+        return BakingSolutionSettings.from_scene(context.scene).active_group is not None
 
     def execute(self, context):
-        group = context.scene.baking_solution.active_group
+        group = BakingSolutionSettings.from_scene(context.scene).active_group
+        if group is None: return {'FINISHED'}
         for object in context.selected_objects:
             add_object_to_sources(group.sources, object)
         return {'FINISHED'}
@@ -195,7 +238,7 @@ class OperatorRemoveFromActiveGroup(bpy.types.Operator):
     remove_index: IntProperty(default = -1)
 
     def execute(self, context):
-        settings = context.scene.baking_solution
+        settings = BakingSolutionSettings.from_scene(context.scene)
         group = settings.groups[settings.group_index]
         if group is None:
             return {'CANCELLED', "No active group selected"}
@@ -204,12 +247,19 @@ class OperatorRemoveFromActiveGroup(bpy.types.Operator):
         group.sources.remove(self.remove_index)
         return {'FINISHED'}
 
-def find_image_node(object, image):
+def find_image_node(object, image) -> (bpy.types.Node, bpy.types.Material):
     for mat in object.data.materials:
         for node in mat.node_tree.nodes:
             if node.type == 'TEX_IMAGE' and node.image == image:
                 return node, mat
     return None, None
+
+def register_class(cls: type):
+    if hasattr(bpy.types, cls.__name__):
+        bpy.utils.unregister_class(getattr(bpy.types, cls.__name__))
+
+    bpy.utils.register_class(cls)
+    return getattr(bpy.types, cls.__name__)
 
 """ Thanks
 https://devtalk.blender.org/t/question-about-ui-lock-ups-when-running-a-python-script/6406/8 """
@@ -231,21 +281,23 @@ def init_bake_macro():
             dns['bake_set_finished'] = True
             return {'FINISHED'}
 
-    if hasattr(bpy.types, 'BAKING_SOLUTION_OT_bake_macro'):
-        bpy.utils.unregister_class(bpy.types.BAKING_SOLUTION_OT_bake_macro)
-
-    bpy.utils.register_class(BAKING_SOLUTION_OT_bake_macro)
-    if not hasattr(bpy.types, 'BAKING_SOLUTION_OT_set_bake_finished'):
-        bpy.utils.register_class(BAKING_SOLUTION_OT_set_bake_finished)
-
-    return bpy.types.BAKING_SOLUTION_OT_bake_macro
+    register_class(BAKING_SOLUTION_OT_set_bake_finished)
+    return register_class(BAKING_SOLUTION_OT_bake_macro)
+    #if hasattr(bpy.types, 'BAKING_SOLUTION_OT_bake_macro'):
+    #    bpy.utils.unregister_class(bpy.types.BAKING_SOLUTION_OT_bake_macro)
+    #
+    #bpy.utils.register_class(BAKING_SOLUTION_OT_bake_macro)
+    #if not hasattr(bpy.types, 'BAKING_SOLUTION_OT_set_bake_finished'):
+    #    bpy.utils.register_class(BAKING_SOLUTION_OT_set_bake_finished)
+    #
+    #return bpy.types.BAKING_SOLUTION_OT_bake_macro
 
 class BAKING_SOLUTION_OT_pre_bake(bpy.types.Operator):
     bl_idname = 'baking_solution.pre_bake'
     bl_label = "Pre Bake"
     bl_options = {'INTERNAL'}
 
-    image = None
+    image: bpy.types.Image
     scale_w = 0
     scale_h = 0
     do_rescale = False
@@ -264,7 +316,7 @@ class BAKING_SOLUTION_OT_post_bake(bpy.types.Operator):
     bl_label = "Post Bake"
     bl_options = {'INTERNAL'}
 
-    image = None
+    image: bpy.types.Image
     scale_w = 0
     scale_h = 0
     do_rescale = False
@@ -283,7 +335,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
     bl_label = 'Bake'
 
     @classmethod
-    def poll(cls, context):
+    def poll(cls, context):  # pyright: ignore
         if bpy.app.driver_namespace.get('bake_set_finished') is not None:
             return False
         if context.scene.render.engine != 'CYCLES':
@@ -300,7 +352,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
     def invoke(self, context, event):
-        settings = context.scene.baking_solution
+        settings = BakingSolutionSettings.from_scene(context.scene)
         render = context.scene.render
         group = settings.groups[settings.group_index]
         solution_settings = settings.active_solution_settings
@@ -366,7 +418,7 @@ class BAKING_SOLUTION_OT_bake_modal(bpy.types.Operator):
 
         define(macro, 'BAKING_SOLUTION_OT_set_bake_finished')
 
-        bpy.ops.baking_solution.bake_macro('INVOKE_DEFAULT')
+        bpy.ops.baking_solution.bake_macro('INVOKE_DEFAULT')  # pyright: ignore
 
         wm = context.window_manager
         self.refresh = wm.event_timer_add(0.1, window=context.window)
@@ -382,8 +434,10 @@ class OperatorResetNodePropToDefaults(bpy.types.Operator):
     prop: StringProperty()
 
     def execute(self, context):
-        default_data = context.scene.baking_solution.solution_defaults
-        data = context.scene.baking_solution.active_group.solution_settings
+        settings = BakingSolutionSettings.from_scene(context.scene)
+        default_data = settings.solution_defaults
+        if settings.active_group is None: return {'FINISHED'}
+        data = settings.active_group.solution_settings
         setattr(data,self.prop, getattr(default_data,self.prop))
         return {'FINISHED'}
 
@@ -402,101 +456,120 @@ class OperatorSelectGroup(bpy.types.Operator):
     select_id: IntProperty(default = -1)
 
     def execute(self, context):
-        context.scene.baking_solution.group_index = self.select_id
+        BakingSolutionSettings.from_scene(context.scene).group_index = self.select_id
         return {'FINISHED'}
 
 # Node Graph
 
 def update_node_solution():
     context = bpy.context
-    scene = getattr(context,"scene", bpy.data.scenes[0])
-    settings = scene.baking_solution
+    scene = getattr(context, "scene", bpy.data.scenes[0])
+    settings = BakingSolutionSettings.from_scene(scene)
     solution_settings = settings.active_solution_settings
 
     node_bake_solution = bpy.data.node_groups.get("BakingSolution")
     if node_bake_solution is None:
-        node_bake_solution = bpy.data.node_groups.new("BakingSolution","ShaderNodeTree")
+        node_bake_solution = bpy.data.node_groups.new("BakingSolution", "ShaderNodeTree")
+
+    interface = node_bake_solution.interface
 
     def clear_tree(tree):
         for i in tree.keys():
             tree.remove(tree.get(i))
 
-    def tree_get_or_create(tree, type, name):
-        node = tree.get(name)
-        if node is None or node.bl_socket_idname != type:
-            if not node is None:
-                tree.remove(node)
-            print("(Re)creating {} to {} {}".format(node, type, name))
-            node = tree.new(type, name)
-        return node
+    def pin(socket_type, in_out, name, description = "") -> NodeTreeInterfaceSocket:
+        existing_pin = cast(NodeTreeInterfaceSocket, interface.items_tree.get(name))
+        if existing_pin is not None:
+            if existing_pin.socket_type == socket_type:
+                return existing_pin
+            interface.remove(name)
+        return interface.new_socket(name, description=description, in_out=in_out, socket_type=socket_type)
+
+    # just for pyright's sake I will define custom functions to convert stuff
+    def color_pin(in_out, name, description = "") -> NodeTreeInterfaceSocketColor:
+        return cast(NodeTreeInterfaceSocketColor, pin('NodeSocketColor', in_out, name, description))
+
+    def vector_pin(in_out, name, description = "") -> NodeTreeInterfaceSocketVector:
+        return cast(NodeTreeInterfaceSocketVector, pin('NodeSocketVector', in_out, name, description))
+
+    def float_pin(in_out, name, description = "") -> NodeTreeInterfaceSocketFloat:
+        return cast(NodeTreeInterfaceSocketFloat, pin('NodeSocketFloat', in_out, name, description))
+
+    def shader_pin(in_out, name, description = "") -> NodeTreeInterfaceSocketShader:
+        return cast(NodeTreeInterfaceSocketShader, pin('NodeSocketShader', in_out, name, description))
 
     nodes = node_bake_solution.nodes
-    inputs = node_bake_solution.inputs
-    outputs = node_bake_solution.outputs
+    #inputs = node_bake_solution.inputs
+    #outputs = node_bake_solution.outputs
     links = node_bake_solution.links
     clear_tree(nodes)
-    in_diffuse = tree_get_or_create(inputs, "NodeSocketColor", "Diffuse")
+
+    in_diffuse = color_pin('INPUT', "Diffuse", "Material's base color")
     in_diffuse.default_value = (0.5, 0.5, 0.5, 1.0)
-    in_roughness = tree_get_or_create(inputs, "NodeSocketFloat", "Roughness")
+    in_roughness = float_pin('INPUT', "Roughness", "Scalar roughness value")
     in_roughness.default_value = 0.5
     in_roughness.min_value = 0.0
     in_roughness.max_value = 1.0
-    in_ao = tree_get_or_create(inputs, "NodeSocketFloat", "AO")
+    in_ao = float_pin('INPUT', "AO", "Ambient Occlusion")
     in_ao.default_value = 1.0
     in_ao.min_value = 0.0
     in_ao.max_value = 1.0
-    in_metallic = tree_get_or_create(inputs, "NodeSocketFloat", "Metallic")
+    in_metallic = float_pin('INPUT', "Metallic", "Scalar metallic value")
     in_metallic.default_value = 0.0
     in_metallic.min_value = 0.0
     in_metallic.max_value = 1.0
-    in_emission = tree_get_or_create(inputs, "NodeSocketColor", "Emission")
+    in_emission = color_pin('INPUT', "Emission", "Colored emission")
     in_emission.default_value = (0.0, 0.0, 0.0, 1.0)
-    out_shader = tree_get_or_create(outputs, "NodeSocketShader", "Shader")
-    #print(node_bake_solution.inputs.keys())
+    out_shader = shader_pin('OUTPUT', "Shader", "Connect this to material output node as surface")
+    # print(node_bake_solution.inputs.keys())
     node_in = nodes.new("NodeGroupInput")
     node_out = nodes.new("NodeGroupOutput")
-    node_out.location = (1000,0)
+    node_out.location = (1000, 0)
+
+    T = TypeVar("T")
+    def new_node(cls: Type[T]) -> T:
+        return cast(cls, nodes.new(cls.__name__))
 
     mode = settings.solution_mode
-    if mode == 'COMBINED': # Preview shader pipeline
+    if mode == 'COMBINED':  # Preview shader pipeline
         node_principled = nodes.new("ShaderNodeBsdfPrincipled")
-        node_principled.location = (300,0)
+        node_principled.location = (300, 0)
         node_principled.label = "Preview"
 
-        node_emission_mul = nodes.new("ShaderNodeMixRGB")
+        node_emission_mul = new_node(ShaderNodeMixRGB)
         node_emission_mul.blend_type = 'MULTIPLY'
-        node_emission_mul.inputs[0].default_value = 1.0
+        cast(NodeSocketFloat, node_emission_mul.inputs[0]).default_value = 1.0
         if solution_settings.combined_emission_clamp:
-            node_emission_clamp = nodes.new("ShaderNodeMixRGB")
+            node_emission_clamp = new_node(ShaderNodeMixRGB)
             node_emission_clamp.blend_type = 'MULTIPLY'
-            node_emission_clamp.inputs[0].default_value = 0.0
+            cast(NodeSocketFloat, node_emission_clamp.inputs[0]).default_value = 0.0
             node_emission_clamp.use_clamp = True
             links.new(node_in.outputs[in_emission.name], node_emission_clamp.inputs[1])
             links.new(node_emission_clamp.outputs[0], node_emission_mul.inputs[1])
         else:
             links.new(node_in.outputs[in_emission.name], node_emission_mul.inputs[1])
         emit_mul = solution_settings.combined_emission_mul
-        node_emission_mul.inputs[2].default_value = (emit_mul, emit_mul, emit_mul, 1.0)
+        cast(NodeSocketColor, node_emission_mul.inputs[2]).default_value = (emit_mul, emit_mul, emit_mul, 1.0)
         links.new(node_in.outputs[in_diffuse.name], node_principled.inputs["Base Color"])
         links.new(node_in.outputs[in_roughness.name], node_principled.inputs["Roughness"])
         links.new(node_in.outputs[in_metallic.name], node_principled.inputs["Metallic"])
-        links.new(node_emission_mul.outputs[0], node_principled.inputs["Emission"])
+        links.new(node_emission_mul.outputs[0], node_principled.inputs["Emission Color"])
         links.new(node_out.inputs[out_shader.name], node_principled.outputs["BSDF"])
-    elif mode == 'DIFFUSE': # Diffuse bake shader pipeline (it is needed because metallic kills diffuse)
+    elif mode == 'DIFFUSE':  # Diffuse bake shader pipeline (it is needed because metallic kills diffuse)
         node_emit = nodes.new("ShaderNodeEmission")
         node_emit.location = (300, 0)
         links.new(node_in.outputs[in_diffuse.name], node_emit.inputs["Color"])
         links.new(node_emit.outputs["Emission"], node_out.inputs[out_shader.name])
-    elif mode == 'MASKS': # Masks bake shader pipeline
-        node_ao = nodes.new("ShaderNodeAmbientOcclusion")
-        node_ao.location = (300,-200)
-        node_mixao = nodes.new("ShaderNodeMath")
-        node_mixao.location = (500,-200)
+    elif mode == 'MASKS':  # Masks bake shader pipeline
+        node_ao = new_node(ShaderNodeAmbientOcclusion)
+        node_ao.location = (300, -200)
+        node_mixao = new_node(ShaderNodeMath)
+        node_mixao.location = (500, -200)
         node_mixao.operation = 'MULTIPLY'
         links.new(node_mixao.inputs[0], node_ao.outputs["AO"])
         links.new(node_mixao.inputs[1], node_in.outputs[in_ao.name])
         node_combine = nodes.new("ShaderNodeCombineRGB")
-        node_combine.location = (700,0)
+        node_combine.location = (700, 0)
         out_links = {
             'ROUGHNESS': node_in.outputs[in_roughness.name],
             'METALLIC': node_in.outputs[in_metallic.name],
@@ -508,25 +581,25 @@ def update_node_solution():
         if solution_settings.mask_b != 'NONE':
             links.new(out_links[solution_settings.mask_b], node_combine.inputs["B"])
         links.new(node_out.inputs[out_shader.name], node_combine.outputs["Image"])
-    elif mode == 'NORMAL': # Normal map preview
+    elif mode == 'NORMAL':  # Normal map preview
         node_bump = nodes.new("ShaderNodeBump")
         node_bump.location = (400, 400)
         node_combine = nodes.new("ShaderNodeCombineRGB")
-        node_combine.location = (1000,0)
+        node_combine.location = (1000, 0)
         color_links = {}
         if solution_settings.normal_tangent_space:
-            node_geometry = nodes.new("ShaderNodeNewGeometry")
+            node_geometry = new_node(ShaderNodeNewGeometry)
             node_geometry.location = (200, 0)
-            node_tgv = nodes.new("ShaderNodeVectorMath")
+            node_tgv = new_node(ShaderNodeVectorMath)
             node_tgv.location = (400, 200)
             node_tgv.operation = 'CROSS_PRODUCT'
-            node_nx = nodes.new("ShaderNodeVectorMath")
+            node_nx = new_node(ShaderNodeVectorMath)
             node_nx.location = (600, 400)
             node_nx.operation = 'DOT_PRODUCT'
-            node_ny = nodes.new("ShaderNodeVectorMath")
+            node_ny = new_node(ShaderNodeVectorMath)
             node_ny.location = (600, 200)
             node_ny.operation = 'DOT_PRODUCT'
-            node_nz = nodes.new("ShaderNodeVectorMath")
+            node_nz = new_node(ShaderNodeVectorMath)
             node_nz.location = (600, 0)
             node_nz.operation = 'DOT_PRODUCT'
             links.new(node_tgv.inputs[0], node_geometry.outputs["Tangent"])
@@ -541,7 +614,7 @@ def update_node_solution():
             color_links["Y"] = node_ny.outputs[1]
             color_links["Z"] = node_nz.outputs[1]
         else:
-            node_separate = nodes.new("ShaderNodeSeparateXYZ")
+            node_separate = new_node(ShaderNodeSeparateXYZ)
             node_separate.location = (600,0)
             links.new(node_bump.outputs["Normal"], node_separate.inputs[0])
             color_links["X"] = node_separate.outputs["X"]
@@ -551,28 +624,28 @@ def update_node_solution():
         loc_y = 200
         for normal_dir, link_name in ((solution_settings.normal_r, "R"),(solution_settings.normal_g, "G"),(solution_settings.normal_b, "B")):
             if normal_dir in ['NEG_X','NEG_Y','NEG_Z']:
-                node_neg = nodes.new("ShaderNodeMath")
+                node_neg = new_node(ShaderNodeMath)
                 node_neg.location = (800, loc_y)
                 node_neg.operation = 'MULTIPLY'
-                node_neg.inputs[1].default_value = -1
+                cast(NodeSocketFloat, node_neg.inputs[1]).default_value = -1
                 links.new(node_neg.inputs[0], color_links[axis_map[normal_dir]])
                 links.new(node_neg.outputs[0], node_combine.inputs[link_name])
             else:
                 links.new(color_links[axis_map[normal_dir]], node_combine.inputs[link_name])
             loc_y -= 200
-        node_emit = nodes.new("ShaderNodeEmission")
+        node_emit = new_node(ShaderNodeEmission)
         node_emit.location = (1600, 0)
         node_out.location = (1800, 0)
         if solution_settings.normal_preview_low_range:
-            node_norm1 = nodes.new("ShaderNodeMixRGB")
+            node_norm1 = new_node(ShaderNodeMixRGB)
             node_norm1.location = (1200, 0)
-            node_norm1.inputs[0].default_value = 1
-            node_norm1.inputs[2].default_value = (1,1,1,1)
+            cast(NodeSocketFloat, node_norm1.inputs[0]).default_value = 1
+            cast(NodeSocketColor, node_norm1.inputs[2]).default_value = (1,1,1,1)
             node_norm1.blend_type = 'ADD'
-            node_norm2 = nodes.new("ShaderNodeMixRGB")
+            node_norm2 = new_node(ShaderNodeMixRGB)
             node_norm2.location = (1400, 0)
-            node_norm2.inputs[0].default_value = 1
-            node_norm2.inputs[2].default_value = (0.5,0.5,0.5,1)
+            cast(NodeSocketFloat ,node_norm2.inputs[0]).default_value = 1
+            cast(NodeSocketColor ,node_norm2.inputs[2]).default_value = (0.5,0.5,0.5,1)
             node_norm2.blend_type = 'MULTIPLY'
             links.new(node_norm1.inputs[1], node_combine.outputs["Image"])
             links.new(node_norm2.inputs[1], node_norm1.outputs["Color"])
@@ -602,7 +675,7 @@ class LayoutBakingPanel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
-        settings = context.scene.baking_solution
+        settings = BakingSolutionSettings.from_scene(context.scene)
         node_settings = settings.active_solution_settings
         node_defaults = settings.solution_defaults
 
@@ -614,24 +687,24 @@ class LayoutBakingPanel(bpy.types.Panel):
         layout.label(text = "Groups:")
         box = layout.box()
         group_list = box.column()
-        op_group = group_list.operator('baking_solution.select_group', text = "Defaults", icon = 'DOT', emboss = settings.group_index == -1)
+        op_group = cast(OperatorSelectGroup, group_list.operator('baking_solution.select_group', text = "Defaults", icon = 'DOT', emboss = settings.group_index == -1))
         op_group.select_id = -1
         id = 0
         for group in settings.groups:
             is_selected = id == settings.group_index
             if group.target is None:
-                op_group = group_list.operator('baking_solution.select_group', text = "None", icon = 'DOT', emboss = is_selected)
+                op_group = cast(OperatorSelectGroup, group_list.operator('baking_solution.select_group', text = "None", icon = 'DOT', emboss = is_selected))
                 op_group.select_id = id
             else:
-                op_group = group_list.operator('baking_solution.select_group', text = group.target.name, icon_value = layout.icon(group.target), emboss = is_selected)
+                op_group = cast(OperatorSelectGroup, group_list.operator('baking_solution.select_group', text = group.target.name, icon_value = layout.icon(group.target), emboss = is_selected))
                 op_group.select_id = id
             id += 1
 
         col = layout.column(align = True)
         row = col.row(align = True)
-        op_add = row.operator('baking_solution.add_group', text = "New Group", icon = 'ADD')
+        row.operator('baking_solution.add_group', text = "New Group", icon = 'ADD')
         op_remove = row.operator('baking_solution.remove_current_group', icon = 'REMOVE')
-        op_add_from_selected = col.operator('baking_solution.add_group_from_selected_and_active', icon = 'SHADERFX')
+        col.operator('baking_solution.add_group_from_selected_and_active', icon = 'SHADERFX')
 
         group = settings.active_group
         if not group is None:
@@ -656,7 +729,7 @@ class LayoutBakingPanel(bpy.types.Panel):
                     #object_row.prop(obj, 'object', text = "")
                     object_row.label(text = source.object.name, icon_value = layout.icon(source.object))#'OBJECT_DATA')
                     object_row.prop(source, 'is_enabled', text="", icon = source.is_enabled and 'RESTRICT_RENDER_OFF' or 'RESTRICT_RENDER_ON', emboss = False)
-                    op_remove = object_row.operator('baking_solution.remove_from_active_group', text = "", icon = 'X', emboss = False)
+                    op_remove = cast(OperatorRemoveFromActiveGroup, object_row.operator('baking_solution.remove_from_active_group', text = "", icon = 'X', emboss = False))
                     op_remove.remove_index = obj_id
                     obj_id += 1
 
@@ -678,7 +751,7 @@ class LayoutBakingPanel(bpy.types.Panel):
             box.label(text = "This addon can only bake with cycles. Change render settings.", icon = 'ERROR')
 
         if group is not None and group.target is not None and image_target is not None and image_target.image is not None:
-            node, mat = find_image_node(group.target, image_target.image)
+            node, _ = find_image_node(group.target, image_target.image)
             if node is None:
                 box = layout.box()
                 box.label(text = "Unable to find Image Texture Node for this image", icon = 'ERROR')
@@ -738,9 +811,7 @@ def register():
     bpy.utils.register_class(OperatorUpdateNodeSolution)
     bpy.utils.register_class(OperatorSelectGroup)
     bpy.utils.register_class(LayoutBakingPanel)
-    bpy.types.Scene.baking_solution = bpy.props.PointerProperty(type = BakingSolutionSettings)
-
-    #update_solution()
+    BakingSolutionSettings.register_in_scene_class()
 
 def unregister():
     bpy.utils.unregister_class(BakingSolutionImageTarget)
